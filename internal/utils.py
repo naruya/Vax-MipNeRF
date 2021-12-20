@@ -44,6 +44,7 @@ class Stats:
   loss: float
   losses: float
   weight_l2: float
+  len_c: float
   psnr: float
   psnrs: float
   grad_norm: float
@@ -68,15 +69,18 @@ class Config:
   spherify: bool = False  # Set to True for spherical 360 scenes.
   render_path: bool = False  # If True, render a path. Used only by LLFF.
   llffhold: int = 8  # Use every Nth image for the test set. Used only by LLFF.
+  small_lr_at_first: bool = False  # If True, use small learning rate at first few steps.
   lr_init: float = 5e-4  # The initial learning rate.
   lr_final: float = 5e-6  # The final learning rate.
+  lr_max_steps: int = 1000000  # The number of optimization steps.
   lr_delay_steps: int = 2500  # The number of "warmup" learning steps.
   lr_delay_mult: float = 0.01  # How much sever the "warmup" should be.
   grad_max_norm: float = 0.  # Gradient clipping magnitude, disabled if == 0.
   grad_max_val: float = 0.  # Gradient clipping value, disabled if == 0.
   max_steps: int = 1000000  # The number of optimization steps.
   save_every: int = 100000  # The number of steps to save a checkpoint.
-  print_every: int = 100  # The number of steps between reports to tensorboard.
+  print_every: int = 500  # The number of steps between reports to tensorboard.
+  render_every: int = 5000  # The number of steps between test set image renderings.
   gc_every: int = 10000  # The number of steps between garbage collections.
   test_render_interval: int = 1  # The interval between images saved to disk.
   disable_multiscale_loss: bool = False  # If True, disable multiscale loss.
@@ -96,11 +100,12 @@ def define_common_flags():
       'gin_param', None, 'Newline separated list of Gin parameter bindings.')
   flags.DEFINE_string('train_dir', None, 'where to store ckpts and logs')
   flags.DEFINE_string('data_dir', None, 'input data directory.')
+  flags.DEFINE_string("voxel_dir", "", "voxel data directory")
+  flags.DEFINE_integer("len_inpc", 0, "input size of MLP for train")
   flags.DEFINE_integer(
-      'chunk', 8192,
+      'chunk', 4000,
       'the size of chunks for evaluation inferences, set to the value that'
       'fits your GPU/TPU memory.')
-
 
 def load_config():
   gin.parse_config_files_and_bindings(flags.FLAGS.gin_file,

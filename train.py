@@ -25,8 +25,10 @@ from flax.metrics import tensorboard
 from flax.training import checkpoints
 import jax
 from jax import random
+from jax import device_put
 import jax.numpy as jnp
 import numpy as np
+import os
 
 from internal import datasets
 from internal import math
@@ -37,13 +39,11 @@ from internal import vis
 
 FLAGS = flags.FLAGS
 utils.define_common_flags()
-flags.DEFINE_integer('render_every', 5000,
-                     'The number of steps between test set image renderings.')
 
 jax.config.parse_flags_with_absl()
 
 
-def train_step(model, config, rng, state, batch, lr):
+def train_step(model, voxel, len_inpc, config, rng, state, batch, lr):
   """One optimization step.
 
   Args:
@@ -71,10 +71,12 @@ def train_step(model, config, rng, state, batch, lr):
         tree_sum_fn(lambda z: jnp.sum(z**2)) /
         tree_sum_fn(lambda z: jnp.prod(jnp.array(z.shape))))
 
-    ret = model.apply(
+    ret, aux = model.apply(
         variables,
         key,
         batch['rays'],
+        voxel,
+        len_inpc,
         randomized=config.randomized,
         white_bkgd=config.white_bkgd)
 
@@ -95,6 +97,7 @@ def train_step(model, config, rng, state, batch, lr):
         loss=loss,
         losses=losses,
         weight_l2=weight_l2,
+        len_c=aux[0],
         psnr=0.0,
         psnrs=0.0,
         grad_norm=0.0,
@@ -134,6 +137,7 @@ def train_step(model, config, rng, state, batch, lr):
       loss=stats.loss,
       losses=stats.losses,
       weight_l2=stats.weight_l2,
+      len_c=stats.len_c,
       psnr=psnrs[-1],
       psnrs=psnrs,
       grad_norm=grad_norm,
@@ -144,13 +148,11 @@ def train_step(model, config, rng, state, batch, lr):
   return new_state, stats, rng
 
 
-def main(unused_argv):
+def train(config, check=False):
   rng = random.PRNGKey(20200823)
   # Shift the numpy random seed by host_id() to shuffle data loaded by different
   # hosts.
   np.random.seed(20201473 + jax.host_id())
-
-  config = utils.load_config()
 
   if config.batch_size % jax.device_count() != 0:
     raise ValueError('Batch size must be divisible by the number of devices.')
@@ -167,16 +169,25 @@ def main(unused_argv):
   state = utils.TrainState(optimizer=optimizer)
   del optimizer, variables
 
+  ### Vax
+  voxel, len_c, len_f = None, 0, 0
+  if not FLAGS.voxel_dir == "":
+    voxel = device_put(jnp.load(os.path.join(FLAGS.voxel_dir, "voxel.npy")))
+    if os.path.exists(os.path.join(FLAGS.train_dir, "len_inp.txt")):
+      with open(os.path.join(FLAGS.train_dir, "len_inp.txt"), 'r') as f:
+        len_c = int(f.readline().split()[0])
+        FLAGS.len_inpc = int(len_c*1.2)
+
   learning_rate_fn = functools.partial(
       math.learning_rate_decay,
       lr_init=config.lr_init,
       lr_final=config.lr_final,
-      max_steps=config.max_steps,
+      max_steps=config.lr_max_steps,
       lr_delay_steps=config.lr_delay_steps,
       lr_delay_mult=config.lr_delay_mult)
 
   train_pstep = jax.pmap(
-      functools.partial(train_step, model, config),
+      functools.partial(train_step, model, voxel, FLAGS.len_inpc, config),
       axis_name='batch',
       in_axes=(0, 0, 0, None),
       donate_argnums=(2,))
@@ -188,8 +199,10 @@ def main(unused_argv):
             variables,
             random.PRNGKey(0),  # Unused.
             rays,
+            voxel,
+            FLAGS.len_inpc,
             randomized=False,
-            white_bkgd=config.white_bkgd),
+            white_bkgd=config.white_bkgd)[0],
         axis_name='batch')
 
   render_eval_pfn = jax.pmap(
@@ -218,7 +231,8 @@ def main(unused_argv):
   gc.disable()  # Disable automatic garbage collection for efficiency.
   stats_trace = []
   reset_timer = True
-  for step, batch in zip(range(init_step, config.max_steps + 1), pdataset):
+  max_steps = 500 if check else config.max_steps
+  for step, batch in zip(range(init_step, max_steps + 1), pdataset):
     if reset_timer:
       t_loop_start = time.time()
       reset_timer = False
@@ -244,6 +258,8 @@ def main(unused_argv):
         summary_writer.scalar('weight_l2', stats.weight_l2[0], step)
         avg_loss = np.mean(np.concatenate([s.loss for s in stats_trace]))
         avg_psnr = np.mean(np.concatenate([s.psnr for s in stats_trace]))
+        ### Vax
+        len_c = max(len_c, int(np.max(np.concatenate([s.len_c for s in stats_trace]))))
         max_grad_norm = np.max(
             np.concatenate([s.grad_norm for s in stats_trace]))
         avg_grad_norm = np.mean(
@@ -268,10 +284,10 @@ def main(unused_argv):
         summary_writer.scalar('train_rays_per_sec', rays_per_sec, step)
         precision = int(np.ceil(np.log10(config.max_steps))) + 1
         print(('{:' + '{:d}'.format(precision) + 'd}').format(step) +
-              f'/{config.max_steps:d}: ' + f'i_loss={stats.loss[0]:0.4f}, ' +
+              f'/{max_steps:d}: ' + f'i_loss={stats.loss[0]:0.4f}, ' +
               f'avg_loss={avg_loss:0.4f}, ' +
               f'weight_l2={stats.weight_l2[0]:0.2e}, ' + f'lr={lr:0.2e}, ' +
-              f'{rays_per_sec:0.0f} rays/sec')
+              f"len_c={len_c}, " + f'{rays_per_sec:0.0f} rays/sec')
       if step % config.save_every == 0:
         state_to_save = jax.device_get(jax.tree_map(lambda x: x[0], state))
         checkpoints.save_checkpoint(
@@ -315,6 +331,28 @@ def main(unused_argv):
     state = jax.device_get(jax.tree_map(lambda x: x[0], state))
     checkpoints.save_checkpoint(
         FLAGS.train_dir, state, int(config.max_steps), keep=100)
+
+  ### Vax
+  if check:
+    import shutil
+    shutil.rmtree(FLAGS.train_dir)
+    os.makedirs(FLAGS.train_dir)
+    with open(os.path.join(FLAGS.train_dir, "len_inp.txt"), 'w') as f:
+      f.write(str(int(len_c)))
+
+
+def main(unused_argv):
+  config = utils.load_config()
+
+  ### Vax
+  if not FLAGS.voxel_dir == "":
+    if not os.path.exists(os.path.join(FLAGS.train_dir, "len_inp.txt")):
+      # check len_inpc
+      train(config, True)
+      # p = Process(target=train, args=(True,))
+      # p.start(); p.join()  # avoid memory leaks
+
+  train(config)
 
 
 if __name__ == '__main__':

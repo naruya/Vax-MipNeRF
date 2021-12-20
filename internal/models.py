@@ -21,6 +21,7 @@ import gin
 import jax
 from jax import random
 import jax.numpy as jnp
+import numpy as np
 
 from internal import mip
 from internal import utils
@@ -45,9 +46,10 @@ class MipNerfModel(nn.Module):
   rgb_activation: Callable[..., Any] = nn.sigmoid  # The RGB activation.
   rgb_padding: float = 0.001  # Padding added to the RGB outputs.
   disable_integration: bool = False  # If True, use PE instead of IPE.
+  use_vax: bool = True  # If True, use Vax.
 
   @nn.compact
-  def __call__(self, rng, rays, randomized, white_bkgd):
+  def __call__(self, rng, rays, voxel, len_inpc, randomized, white_bkgd):
     """The mip-NeRF Model.
 
     Args:
@@ -94,6 +96,19 @@ class MipNerfModel(nn.Module):
         )
       if self.disable_integration:
         samples = (samples[0], jnp.zeros_like(samples[1]))
+
+      batch_size, num_samples = samples[0].shape[:-1]
+      samples = (samples[0].reshape(batch_size * num_samples, -1),
+                 samples[1].reshape(batch_size * num_samples, -1))
+
+      if self.use_vax:
+        pts= digitize(samples[0], rays.near[0,0], rays.far[0,0], voxel.shape[0])
+        mask = voxel[pts[..., 0], pts[..., 1], pts[..., 2]].squeeze()
+        len_c = jnp.sum(mask)
+        ind_inp, ind_bak = jnp.split(jnp.argsort(mask)[::-1], [len_inpc])
+      else:
+        ind_inp, ind_bak = Ellipsis, Ellipsis
+
       samples_enc = mip.integrated_pos_enc(
           samples,
           self.min_deg_point,
@@ -108,9 +123,20 @@ class MipNerfModel(nn.Module):
             max_deg=self.deg_view,
             append_identity=True,
         )
-        raw_rgb, raw_density = mlp(samples_enc, viewdirs_enc)
+        viewdirs_enc = jnp.tile(viewdirs_enc[:, None, :], (1, num_samples, 1))
+        viewdirs_enc =  viewdirs_enc.reshape(batch_size * num_samples, -1)
+        raw_rgb, raw_density = mlp(samples_enc[ind_inp], viewdirs_enc[ind_inp])  # 1,128,3, 1,128,1??
       else:
-        raw_rgb, raw_density = mlp(samples_enc)
+        raw_rgb, raw_density = mlp(samples_enc[ind_inp])
+
+      if self.use_vax:
+        ind = jnp.argsort(jnp.concatenate([ind_inp, ind_bak]))
+        len_pad = batch_size * num_samples - len_inpc  # 1024 * 128
+        raw_rgb = jnp.vstack([raw_rgb, jnp.zeros([len_pad, 3])])[ind] * mask[:, None]
+        raw_density = jnp.vstack([raw_density, jnp.zeros([len_pad, 1])])[ind] * mask[:, None]
+
+      raw_rgb = raw_rgb.reshape(batch_size, num_samples, 3)
+      raw_density = raw_density.reshape(batch_size, num_samples, 1)
 
       # Add noise to regularize the density predictions if needed.
       if randomized and (self.density_noise > 0):
@@ -131,7 +157,12 @@ class MipNerfModel(nn.Module):
       )
       ret.append((comp_rgb, distance, acc))
 
-    return ret
+    aux = (len_c,) if self.use_vax else (0,)
+    return ret, aux
+
+
+def digitize(p, near, far, size):
+  return jnp.digitize(p + (near + far) / 2., jnp.linspace(near, far, size-1))
 
 
 def construct_mipnerf(rng, example_batch):
@@ -151,6 +182,8 @@ def construct_mipnerf(rng, example_batch):
       key,
       rng=rng,
       rays=utils.namedtuple_map(lambda x: x[0], example_batch['rays']),
+      voxel=jnp.zeros([400,400,400]),
+      len_inpc=1,
       randomized=False,
       white_bkgd=False)
   return model, init_variables
@@ -186,9 +219,6 @@ class MLP(nn.Module):
       raw_density: jnp.ndarray(float32), with a shape of
            [batch, num_samples, num_density_channels].
     """
-    feature_dim = x.shape[-1]
-    num_samples = x.shape[1]
-    x = x.reshape([-1, feature_dim])
     dense_layer = functools.partial(
         nn.Dense, kernel_init=jax.nn.initializers.glorot_uniform())
     inputs = x
@@ -197,26 +227,17 @@ class MLP(nn.Module):
       x = self.net_activation(x)
       if i % self.skip_layer == 0 and i > 0:
         x = jnp.concatenate([x, inputs], axis=-1)
-    raw_density = dense_layer(self.num_density_channels)(x).reshape(
-        [-1, num_samples, self.num_density_channels])
+    raw_density = dense_layer(self.num_density_channels)(x)
 
     if condition is not None:
       # Output of the first part of MLP.
       bottleneck = dense_layer(self.net_width)(x)
-      # Broadcast condition from [batch, feature] to
-      # [batch, num_samples, feature] since all the samples along the same ray
-      # have the same viewdir.
-      condition = jnp.tile(condition[:, None, :], (1, num_samples, 1))
-      # Collapse the [batch, num_samples, feature] tensor to
-      # [batch * num_samples, feature] so that it can be fed into nn.Dense.
-      condition = condition.reshape([-1, condition.shape[-1]])
       x = jnp.concatenate([bottleneck, condition], axis=-1)
       # Here use 1 extra layer to align with the original nerf model.
       for i in range(self.net_depth_condition):
         x = dense_layer(self.net_width_condition)(x)
         x = self.net_activation(x)
-    raw_rgb = dense_layer(self.num_rgb_channels)(x).reshape(
-        [-1, num_samples, self.num_rgb_channels])
+    raw_rgb = dense_layer(self.num_rgb_channels)(x)
     return raw_rgb, raw_density
 
 
@@ -236,7 +257,8 @@ def render_image(render_fn, rays, rng, chunk=8192):
   """
   height, width = rays[0].shape[:2]
   num_rays = height * width
-  rays = utils.namedtuple_map(lambda r: r.reshape((num_rays, -1)), rays)
+  ind = np.random.permutation(np.arange(num_rays))
+  rays = utils.namedtuple_map(lambda r: r.reshape((num_rays, -1))[ind], rays)
 
   host_id = jax.host_id()
   results = []
@@ -260,7 +282,8 @@ def render_image(render_fn, rays, rng, chunk=8192):
     chunk_results = render_fn(rng, chunk_rays)[-1]
     results.append([utils.unshard(x[0], padding) for x in chunk_results])
     # pylint: enable=cell-var-from-loop
-  rgb, distance, acc = [jnp.concatenate(r, axis=0) for r in zip(*results)]
+  ind = jnp.argsort(ind)
+  rgb, distance, acc = [jnp.concatenate(r, axis=0)[ind] for r in zip(*results)]
   rgb = rgb.reshape((height, width, -1))
   distance = distance.reshape((height, width))
   acc = acc.reshape((height, width))

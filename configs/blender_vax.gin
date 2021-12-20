@@ -1,3 +1,2 @@
 Config.dataset_loader = 'blender'
 Config.batching = 'single_image'
-MipNerfModel.use_vax = False
