@@ -65,6 +65,7 @@ class Config:
   dataset_loader: str = 'multicam'  # The type of dataset loader to use.
   batching: str = 'all_images'  # Batch composition, [single_image, all_images].
   batch_size: int = 4096  # The number of rays/pixels in each batch.
+  chunk: int = 4000  # The size of chunks for evaluation inferences.
   factor: int = 0  # The downsample factor of images, 0 for no downsampling.
   spherify: bool = False  # Set to True for spherical 360 scenes.
   render_path: bool = False  # If True, render a path. Used only by LLFF.
@@ -102,10 +103,6 @@ def define_common_flags():
   flags.DEFINE_string('data_dir', None, 'input data directory.')
   flags.DEFINE_string("voxel_dir", "", "voxel data directory")
   flags.DEFINE_integer("len_inpc", 0, "input size of MLP for train")
-  flags.DEFINE_integer(
-      'chunk', 4000,
-      'the size of chunks for evaluation inferences, set to the value that'
-      'fits your GPU/TPU memory.')
 
 def load_config():
   gin.parse_config_files_and_bindings(flags.FLAGS.gin_file,

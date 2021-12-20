@@ -125,18 +125,9 @@ class MipNerfModel(nn.Module):
         )
         viewdirs_enc = jnp.tile(viewdirs_enc[:, None, :], (1, num_samples, 1))
         viewdirs_enc =  viewdirs_enc.reshape(batch_size * num_samples, -1)
-        raw_rgb, raw_density = mlp(samples_enc[ind_inp], viewdirs_enc[ind_inp])  # 1,128,3, 1,128,1??
+        raw_rgb, raw_density = mlp(samples_enc[ind_inp], viewdirs_enc[ind_inp])
       else:
         raw_rgb, raw_density = mlp(samples_enc[ind_inp])
-
-      if self.use_vax:
-        ind = jnp.argsort(jnp.concatenate([ind_inp, ind_bak]))
-        len_pad = batch_size * num_samples - len_inpc  # 1024 * 128
-        raw_rgb = jnp.vstack([raw_rgb, jnp.zeros([len_pad, 3])])[ind] * mask[:, None]
-        raw_density = jnp.vstack([raw_density, jnp.zeros([len_pad, 1])])[ind] * mask[:, None]
-
-      raw_rgb = raw_rgb.reshape(batch_size, num_samples, 3)
-      raw_density = raw_density.reshape(batch_size, num_samples, 1)
 
       # Add noise to regularize the density predictions if needed.
       if randomized and (self.density_noise > 0):
@@ -148,6 +139,16 @@ class MipNerfModel(nn.Module):
       rgb = self.rgb_activation(raw_rgb)
       rgb = rgb * (1 + 2 * self.rgb_padding) - self.rgb_padding
       density = self.density_activation(raw_density + self.density_bias)
+
+      if self.use_vax:
+        ind = jnp.argsort(jnp.concatenate([ind_inp, ind_bak]))
+        len_pad = batch_size * num_samples - len_inpc
+        rgb = jnp.vstack([rgb, jnp.zeros([len_pad, 3])])[ind] * mask[:, None]
+        density = jnp.vstack([density, jnp.zeros([len_pad, 1])])[ind] * mask[:, None]
+
+      rgb = rgb.reshape(batch_size, num_samples, 3)
+      density = density.reshape(batch_size, num_samples, 1)
+
       comp_rgb, distance, acc, weights = mip.volumetric_rendering(
           rgb,
           density,

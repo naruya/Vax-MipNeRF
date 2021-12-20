@@ -176,7 +176,9 @@ def train(config, check=False):
     if os.path.exists(os.path.join(FLAGS.train_dir, "len_inp.txt")):
       with open(os.path.join(FLAGS.train_dir, "len_inp.txt"), 'r') as f:
         len_c = int(f.readline().split()[0])
-        FLAGS.len_inpc = int(len_c*1.2)
+        FLAGS.len_inpc = int(len_c*1.5)
+    else:
+      FLAGS.len_inpc = config.batch_size * model.num_samples
 
   learning_rate_fn = functools.partial(
       math.learning_rate_decay,
@@ -294,7 +296,7 @@ def train(config, check=False):
             FLAGS.train_dir, state_to_save, int(step), keep=100)
 
     # Test-set evaluation.
-    if FLAGS.render_every > 0 and step % FLAGS.render_every == 0:
+    if config.render_every > 0 and step % config.render_every == 0:
       # We reuse the same random number generator from the optimization step
       # here on purpose so that the visualization matches what happened in
       # training.
@@ -306,7 +308,7 @@ def train(config, check=False):
           functools.partial(render_eval_pfn, eval_variables),
           test_case['rays'],
           keys[0],
-          chunk=FLAGS.chunk)
+          chunk=config.chunk)
 
       vis_suite = vis.visualize_suite(pred_distance, pred_acc)
 
