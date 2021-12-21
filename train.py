@@ -178,7 +178,11 @@ def train(config, check=False):
         len_c = int(f.readline().split()[0])
         FLAGS.len_inpc = int(len_c*1.5)
     else:
-      FLAGS.len_inpc = config.batch_size * model.num_samples
+      # hierarchical sampling
+      if model.num_levels > 1:
+        FLAGS.len_inpc = config.batch_size * model.num_samples
+      else:
+        FLAGS.len_inpc = 1
 
   learning_rate_fn = functools.partial(
       math.learning_rate_decay,
@@ -290,7 +294,7 @@ def train(config, check=False):
               f'avg_loss={avg_loss:0.4f}, ' +
               f'weight_l2={stats.weight_l2[0]:0.2e}, ' + f'lr={lr:0.2e}, ' +
               f"len_c={len_c}, " + f'{rays_per_sec:0.0f} rays/sec')
-      if step % config.save_every == 0:
+      if step % config.save_every == 0 or ((step < config.save_every) and ((step*10) % config.save_every == 0)):
         state_to_save = jax.device_get(jax.tree_map(lambda x: x[0], state))
         checkpoints.save_checkpoint(
             FLAGS.train_dir, state_to_save, int(step), keep=100)

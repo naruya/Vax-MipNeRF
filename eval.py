@@ -24,7 +24,10 @@ from flax.metrics import tensorboard
 from flax.training import checkpoints
 import jax
 from jax import random
+from jax import device_put
+import jax.numpy as jnp
 import numpy as np
+import glob
 
 from internal import datasets
 from internal import math
@@ -43,6 +46,7 @@ flags.DEFINE_bool('save_output', True,
 
 
 def main(unused_argv):
+  assert jax.host_count() == 1, "not recommended for vaxnerf"
   config = utils.load_config()
 
   dataset = datasets.get_dataset('test', FLAGS.data_dir, config)
@@ -52,6 +56,14 @@ def main(unused_argv):
   state = utils.TrainState(optimizer=optimizer)
   del optimizer, init_variables
 
+  if not FLAGS.voxel_dir == "":
+    voxel = device_put(jnp.load(path.join(FLAGS.voxel_dir, "voxel.npy")))
+    with open(path.join(FLAGS.train_dir, "len_inp.txt"), 'r') as f:
+      len_c = int(f.readline().split()[0])
+      FLAGS.len_inpc = int(len_c*2.)
+  else:
+    voxel = None
+
   # Rendering is forced to be deterministic even if training was randomized, as
   # this eliminates 'speckle' artifacts.
   def render_eval_fn(variables, _, rays):
@@ -60,8 +72,10 @@ def main(unused_argv):
             variables,
             random.PRNGKey(0),  # Unused.
             rays,
+            voxel,
+            FLAGS.len_inpc,
             randomized=False,
-            white_bkgd=config.white_bkgd),
+            white_bkgd=config.white_bkgd)[0],
         axis_name='batch')
 
   # pmap over only the data input.
@@ -74,24 +88,31 @@ def main(unused_argv):
 
   ssim_fn = jax.jit(functools.partial(math.compute_ssim, max_val=1.))
 
-  last_step = 0
+  # last_step = 0
   out_dir = path.join(FLAGS.train_dir,
                       'path_renders' if config.render_path else 'test_preds')
   if not FLAGS.eval_once:
     summary_writer = tensorboard.SummaryWriter(
         path.join(FLAGS.train_dir, 'eval'))
-  while True:
-    state = checkpoints.restore_checkpoint(FLAGS.train_dir, state)
-    step = int(state.optimizer.state.step)
-    if step <= last_step:
-      continue
-    if FLAGS.save_output and (not utils.isdir(out_dir)):
-      utils.makedirs(out_dir)
+  if FLAGS.save_output and (not utils.isdir(out_dir)):
+    utils.makedirs(out_dir)
+
+  steps = sorted([int(cp.split('_')[-1]) for cp in glob.glob(path.join(FLAGS.train_dir, "checkpoint_*"))])
+  if FLAGS.eval_once:
+    steps = steps[-1:]
+  print("eval steps:", steps)
+
+  # while True:
+  for step in steps:
+    state = checkpoints.restore_checkpoint(FLAGS.train_dir, state, step=step)
+    # step = int(state.optimizer.state.step)
+    # if step <= last_step:
+    #   continue
     psnr_values = []
     ssim_values = []
     avg_values = []
     if not FLAGS.eval_once:
-      showcase_index = random.randint(random.PRNGKey(step), (), 0, dataset.size)
+      showcase_index = 0  # random.randint(random.PRNGKey(step), (), 0, dataset.size)
     for idx in range(dataset.size):
       print(f'Evaluating {idx+1}/{dataset.size}')
       batch = next(dataset)
@@ -99,7 +120,7 @@ def main(unused_argv):
           functools.partial(render_eval_pfn, state.optimizer.target),
           batch['rays'],
           None,
-          chunk=FLAGS.chunk)
+          chunk=config.chunk)
 
       vis_suite = vis.visualize_suite(pred_distance, pred_acc)
 
@@ -144,11 +165,11 @@ def main(unused_argv):
         f.write(' '.join([str(v) for v in psnr_values]))
       with utils.open_file(path.join(out_dir, f'ssims_{step}.txt'), 'w') as f:
         f.write(' '.join([str(v) for v in ssim_values]))
-    if FLAGS.eval_once:
-      break
-    if int(step) >= config.max_steps:
-      break
-    last_step = step
+    # if FLAGS.eval_once:
+    #   break
+    # if int(step) >= config.max_steps:
+    #   break
+    # last_step = step
 
 
 if __name__ == '__main__':
