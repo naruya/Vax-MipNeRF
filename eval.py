@@ -38,10 +38,10 @@ from internal import vis
 FLAGS = flags.FLAGS
 utils.define_common_flags()
 flags.DEFINE_bool(
-    'eval_once', True,
+    'eval_once', False,
     'If True, evaluate the model only once, otherwise keeping evaluating new'
     'checkpoints if any exist.')
-flags.DEFINE_bool('save_output', True,
+flags.DEFINE_bool('save_output', False,
                   'If True, save predicted images to disk.')
 
 
