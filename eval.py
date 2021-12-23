@@ -41,7 +41,7 @@ flags.DEFINE_bool(
     'eval_once', False,
     'If True, evaluate the model only once, otherwise keeping evaluating new'
     'checkpoints if any exist.')
-flags.DEFINE_bool('save_output', False,
+flags.DEFINE_bool('save_output', True,
                   'If True, save predicted images to disk.')
 
 
