@@ -150,7 +150,8 @@ def learning_rate_decay(step,
                         lr_final,
                         max_steps,
                         lr_delay_steps=0,
-                        lr_delay_mult=1):
+                        lr_delay_mult=1,
+                        no_update_steps=0):
   """Continuous learning rate decay function.
 
   The returned rate is lr_init when step=0 and lr_final when step=max_steps, and
@@ -177,6 +178,7 @@ def learning_rate_decay(step,
         0.5 * jnp.pi * jnp.clip(step / lr_delay_steps, 0, 1))
   else:
     delay_rate = 1.
+  step = step - no_update_steps if step > no_update_steps else 1
   t = jnp.clip(step / max_steps, 0, 1)
   log_lerp = jnp.exp(jnp.log(lr_init) * (1 - t) + jnp.log(lr_final) * t)
   return delay_rate * log_lerp

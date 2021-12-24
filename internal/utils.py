@@ -45,6 +45,7 @@ class Stats:
   losses: float
   weight_l2: float
   len_c: float
+  len_f: float
   psnr: float
   psnrs: float
   grad_norm: float
@@ -103,6 +104,7 @@ def define_common_flags():
   flags.DEFINE_string('data_dir', None, 'input data directory.')
   flags.DEFINE_string("voxel_dir", "", "voxel data directory")
   flags.DEFINE_integer("len_inpc", 0, "input size of MLP for train")
+  flags.DEFINE_integer("len_inpf", 0, "input size of MLP for train")
 
 def load_config():
   gin.parse_config_files_and_bindings(flags.FLAGS.gin_file,

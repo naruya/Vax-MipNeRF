@@ -59,8 +59,8 @@ def main(unused_argv):
   if not FLAGS.voxel_dir == "":
     voxel = device_put(jnp.load(path.join(FLAGS.voxel_dir, "voxel.npy")))
     with open(path.join(FLAGS.train_dir, "len_inp.txt"), 'r') as f:
-      len_c = int(f.readline().split()[0])
-      FLAGS.len_inpc = int(len_c*2.)
+      len_c, len_f = map(int, f.readline().split())
+      FLAGS.len_inpc, FLAGS.len_inpf = int(len_c*2.), int(len_f*2.)
   else:
     voxel = None
 
@@ -74,6 +74,7 @@ def main(unused_argv):
             rays,
             voxel,
             FLAGS.len_inpc,
+            FLAGS.len_inpf,
             randomized=False,
             white_bkgd=config.white_bkgd)[0],
         axis_name='batch')

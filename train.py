@@ -43,7 +43,7 @@ utils.define_common_flags()
 jax.config.parse_flags_with_absl()
 
 
-def train_step(model, voxel, len_inpc, config, rng, state, batch, lr):
+def train_step(model, voxel, len_inpc, len_inpf, config, rng, state, batch, lr):
   """One optimization step.
 
   Args:
@@ -77,6 +77,7 @@ def train_step(model, voxel, len_inpc, config, rng, state, batch, lr):
         batch['rays'],
         voxel,
         len_inpc,
+        len_inpf,
         randomized=config.randomized,
         white_bkgd=config.white_bkgd)
 
@@ -98,6 +99,7 @@ def train_step(model, voxel, len_inpc, config, rng, state, batch, lr):
         losses=losses,
         weight_l2=weight_l2,
         len_c=aux[0],
+        len_f=aux[1],
         psnr=0.0,
         psnrs=0.0,
         grad_norm=0.0,
@@ -138,6 +140,7 @@ def train_step(model, voxel, len_inpc, config, rng, state, batch, lr):
       losses=stats.losses,
       weight_l2=stats.weight_l2,
       len_c=stats.len_c,
+      len_f=stats.len_f,
       psnr=psnrs[-1],
       psnrs=psnrs,
       grad_norm=grad_norm,
@@ -148,12 +151,13 @@ def train_step(model, voxel, len_inpc, config, rng, state, batch, lr):
   return new_state, stats, rng
 
 
-def train(config, check=False):
+def main(unused_argv):
   rng = random.PRNGKey(20200823)
   # Shift the numpy random seed by host_id() to shuffle data loaded by different
   # hosts.
   np.random.seed(20201473 + jax.host_id())
 
+  config = utils.load_config()
   if config.batch_size % jax.device_count() != 0:
     raise ValueError('Batch size must be divisible by the number of devices.')
 
@@ -170,19 +174,13 @@ def train(config, check=False):
   del optimizer, variables
 
   ### Vax
-  voxel, len_c, len_f = None, 0, 0
   if not FLAGS.voxel_dir == "":
     voxel = device_put(jnp.load(os.path.join(FLAGS.voxel_dir, "voxel.npy")))
     if os.path.exists(os.path.join(FLAGS.train_dir, "len_inp.txt")):
       with open(os.path.join(FLAGS.train_dir, "len_inp.txt"), 'r') as f:
-        len_c = int(f.readline().split()[0])
-        FLAGS.len_inpc = int(len_c*1.5)
-    else:
-      # hierarchical sampling
-      if model.num_levels > 1:
-        FLAGS.len_inpc = config.batch_size * model.num_samples
-      else:
-        FLAGS.len_inpc = 1
+        FLAGS.len_inpc, FLAGS.len_inpf = map(int, f.readline().split())
+  else:
+    voxel = None
 
   learning_rate_fn = functools.partial(
       math.learning_rate_decay,
@@ -190,33 +188,40 @@ def train(config, check=False):
       lr_final=config.lr_final,
       max_steps=config.lr_max_steps,
       lr_delay_steps=config.lr_delay_steps,
-      lr_delay_mult=config.lr_delay_mult)
+      lr_delay_mult=config.lr_delay_mult,
+      no_update_steps=config.print_every)
 
-  train_pstep = jax.pmap(
-      functools.partial(train_step, model, voxel, FLAGS.len_inpc, config),
-      axis_name='batch',
-      in_axes=(0, 0, 0, None),
-      donate_argnums=(2,))
+  def get_pstep_pfn():
+    train_pstep = jax.pmap(
+        functools.partial(train_step, model, voxel,
+                          FLAGS.len_inpc, FLAGS.len_inpf, config),
+        axis_name='batch',
+        in_axes=(0, 0, 0, None),
+        donate_argnums=(2,))
 
-  # Because this is only used for test set rendering, we disable randomization.
-  def render_eval_fn(variables, _, rays):
-    return jax.lax.all_gather(
-        model.apply(
-            variables,
-            random.PRNGKey(0),  # Unused.
-            rays,
-            voxel,
-            FLAGS.len_inpc,
-            randomized=False,
-            white_bkgd=config.white_bkgd)[0],
-        axis_name='batch')
+    # Because this is only used for test set rendering, we disable randomization.
+    def render_eval_fn(variables, _, rays):
+      return jax.lax.all_gather(
+          model.apply(
+              variables,
+              random.PRNGKey(0),  # Unused.
+              rays,
+              voxel,
+              FLAGS.len_inpc*2,
+              FLAGS.len_inpf*2,
+              randomized=False,
+              white_bkgd=config.white_bkgd)[0],
+          axis_name='batch')
 
-  render_eval_pfn = jax.pmap(
-      render_eval_fn,
-      in_axes=(None, None, 0),  # Only distribute the data input.
-      donate_argnums=(2,),
-      axis_name='batch',
-  )
+    render_eval_pfn = jax.pmap(
+        render_eval_fn,
+        in_axes=(None, None, 0),  # Only distribute the data input.
+        donate_argnums=(2,),
+        axis_name='batch',
+    )
+    return train_pstep, render_eval_pfn
+
+  train_pstep, render_eval_pfn = get_pstep_pfn()
 
   ssim_fn = jax.jit(functools.partial(math.compute_ssim, max_val=1.))
 
@@ -237,8 +242,10 @@ def train(config, check=False):
   gc.disable()  # Disable automatic garbage collection for efficiency.
   stats_trace = []
   reset_timer = True
-  max_steps = 500 if check else config.max_steps
-  for step, batch in zip(range(init_step, max_steps + 1), pdataset):
+  len_c_list = []
+  len_f_list = []
+
+  for step, batch in zip(range(init_step, config.max_steps + 1), pdataset):
     if reset_timer:
       t_loop_start = time.time()
       reset_timer = False
@@ -265,7 +272,26 @@ def train(config, check=False):
         avg_loss = np.mean(np.concatenate([s.loss for s in stats_trace]))
         avg_psnr = np.mean(np.concatenate([s.psnr for s in stats_trace]))
         ### Vax
-        len_c = max(len_c, int(np.max(np.concatenate([s.len_c for s in stats_trace]))))
+        len_c_list.extend(np.concatenate([s.len_c for s in stats_trace]))
+        len_f_list.extend(np.concatenate([s.len_f for s in stats_trace]))
+        len_c = int(np.percentile(len_c_list, [99.9]).item())
+        len_f = int(np.percentile(len_f_list, [99.9]).item())
+        flag_update = False
+        if len_c > FLAGS.len_inpc:
+          FLAGS.len_inpc = int(len_c * 1.1)
+          flag_update = True
+        if len_f > FLAGS.len_inpf:
+          FLAGS.len_inpf = int(len_f * 1.1)
+          flag_update = True
+        # do not call this part too many times!
+        if flag_update:
+          print("Recompiling... new num of inps:", FLAGS.len_inpc, FLAGS.len_inpf)
+          del train_pstep, render_eval_pfn
+          gc.collect(); jax.core.reset_trace_state()
+          train_pstep, render_eval_pfn = get_pstep_pfn()
+          with open(os.path.join(FLAGS.train_dir, "len_inp.txt"), 'w') as f:
+            f.write(str(FLAGS.len_inpc) +" " + str(FLAGS.len_inpf))
+
         max_grad_norm = np.max(
             np.concatenate([s.grad_norm for s in stats_trace]))
         avg_grad_norm = np.mean(
@@ -290,10 +316,10 @@ def train(config, check=False):
         summary_writer.scalar('train_rays_per_sec', rays_per_sec, step)
         precision = int(np.ceil(np.log10(config.max_steps))) + 1
         print(('{:' + '{:d}'.format(precision) + 'd}').format(step) +
-              f'/{max_steps:d}: ' + f'i_loss={stats.loss[0]:0.4f}, ' +
+              f'/{config.max_steps:d}: ' + f'i_loss={stats.loss[0]:0.4f}, ' +
               f'avg_loss={avg_loss:0.4f}, ' +
               f'weight_l2={stats.weight_l2[0]:0.2e}, ' + f'lr={lr:0.2e}, ' +
-              f"len_c={len_c}, " + f'{rays_per_sec:0.0f} rays/sec')
+              f"len_c={len_c}, " + f"len_f={len_f}, " + f'{rays_per_sec:0.0f} rays/sec')
       if step % config.save_every == 0 or ((step < config.save_every) and ((step*10) % config.save_every == 0)):
         state_to_save = jax.device_get(jax.tree_map(lambda x: x[0], state))
         checkpoints.save_checkpoint(
@@ -337,28 +363,6 @@ def train(config, check=False):
     state = jax.device_get(jax.tree_map(lambda x: x[0], state))
     checkpoints.save_checkpoint(
         FLAGS.train_dir, state, int(config.max_steps), keep=100)
-
-  ### Vax
-  if check:
-    import shutil
-    shutil.rmtree(FLAGS.train_dir)
-    os.makedirs(FLAGS.train_dir)
-    with open(os.path.join(FLAGS.train_dir, "len_inp.txt"), 'w') as f:
-      f.write(str(int(len_c)))
-
-
-def main(unused_argv):
-  config = utils.load_config()
-
-  ### Vax
-  if not FLAGS.voxel_dir == "":
-    if not os.path.exists(os.path.join(FLAGS.train_dir, "len_inp.txt")):
-      # check len_inpc
-      train(config, True)
-      # p = Process(target=train, args=(True,))
-      # p.start(); p.join()  # avoid memory leaks
-
-  train(config)
 
 
 if __name__ == '__main__':

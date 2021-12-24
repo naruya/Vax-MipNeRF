@@ -49,7 +49,7 @@ class MipNerfModel(nn.Module):
   use_vax: bool = True  # If True, use Vax.
 
   @nn.compact
-  def __call__(self, rng, rays, voxel, len_inpc, randomized, white_bkgd):
+  def __call__(self, rng, rays, voxel, len_inpc, len_inpf, randomized, white_bkgd):
     """The mip-NeRF Model.
 
     Args:
@@ -65,7 +65,9 @@ class MipNerfModel(nn.Module):
     mlp = MLP()
 
     ret = []
+    aux = []
     for i_level in range(self.num_levels):
+      len_inpi = len_inpc if i_level == 0 else len_inpf
       key, rng = random.split(rng)
       if i_level == 0:
         # Stratified sampling along rays
@@ -104,8 +106,8 @@ class MipNerfModel(nn.Module):
       if self.use_vax:
         pts= digitize(samples[0], rays.near[0,0], rays.far[0,0], voxel.shape[0])
         mask = voxel[pts[..., 0], pts[..., 1], pts[..., 2]].squeeze()
-        len_c = jnp.sum(mask)
-        ind_inp, ind_bak = jnp.split(jnp.argsort(mask)[::-1], [len_inpc])
+        aux.append(jnp.sum(mask))
+        ind_inp, ind_bak = jnp.split(jnp.argsort(mask)[::-1], [len_inpi])
       else:
         ind_inp, ind_bak = Ellipsis, Ellipsis
 
@@ -142,7 +144,7 @@ class MipNerfModel(nn.Module):
 
       if self.use_vax:
         ind = jnp.argsort(jnp.concatenate([ind_inp, ind_bak]))
-        len_pad = batch_size * num_samples - len_inpc
+        len_pad = batch_size * num_samples - len_inpi
         rgb = jnp.vstack([rgb, jnp.zeros([len_pad, 3])])[ind] * mask[:, None]
         density = jnp.vstack([density, jnp.zeros([len_pad, 1])])[ind] * mask[:, None]
 
@@ -158,7 +160,7 @@ class MipNerfModel(nn.Module):
       )
       ret.append((comp_rgb, distance, acc))
 
-    aux = (len_c,) if self.use_vax else (0,)
+    aux.extend([0 for i in range(2-len(aux))])
     return ret, aux
 
 
@@ -185,6 +187,7 @@ def construct_mipnerf(rng, example_batch):
       rays=utils.namedtuple_map(lambda x: x[0], example_batch['rays']),
       voxel=jnp.zeros([400,400,400]),
       len_inpc=1,
+      len_inpf=1,
       randomized=False,
       white_bkgd=False)
   return model, init_variables
