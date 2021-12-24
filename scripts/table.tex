@@ -1,0 +1,22 @@
+\begin{table*}
+\centering
+\begin{tabular}{cllllllllllll}
+\multicolumn{13}{c}{Synthetic NeRF Dataset \hspace{1em} \textfirstb{best} \textsecondb{second-best} \textthirdb{third-best}} \\
+\toprule
+& \multicolumn{2}{c}{0.5h} & \multicolumn{2}{c}{1h} & \multicolumn{2}{c}{3h} & \multicolumn{2}{c}{6h} & \multicolumn{2}{c}{12h} & \multicolumn{2}{c}{36h} \\
+Method & PSNR & SSIM & PSNR & SSIM & PSNR & SSIM & PSNR & SSIM & PSNR & SSIM & PSNR & SSIM \\
+\midrule
+c64f64 & 27.07 & 0.908 & 28.64 & 0.926 & 29.98 & 0.939 & 30.73 & 0.946 & 31.22 & 0.949 & 31.39 & 0.951 \\
+c64f128 & 26.66 & 0.903 & 28.36 & 0.923 & 29.96 & 0.939 & 30.75 & 0.946 & 31.4 & 0.951 & \cellthird\bf{31.73} & 0.953 \\
+vax\_c64f64 & 29.33 & 0.932 & 30.07 & 0.939 & 31.1 & 0.948 & 31.38 & 0.95 & 31.43 & 0.951 & 31.43 & 0.951 \\
+vax\_c64f128 & 28.82 & 0.927 & 29.78 & 0.937 & 31.03 & 0.947 & \cellthird\bf{31.53} & 0.951 & \cellthird\bf{31.71} & 0.953 & \cellthird\bf{31.73} & 0.953 \\
+vax\_c400 & \cellfirst\bf{30.04} & \cellfirst\bf{0.939} & \cellsecond\bf{30.73} & \cellfirst\bf{0.945} & \cellthird\bf{31.35} & 0.95 & 31.43 & 0.951 & 31.44 & 0.951 & 31.44 & 0.951 \\
+vax\_c600 & \cellsecond\bf{30.0} & \cellsecond\bf{0.938} & \cellfirst\bf{30.8} & \cellfirst\bf{0.945} & \cellsecond\bf{31.72} & \cellthird\bf{0.952} & \cellsecond\bf{31.92} & \cellthird\bf{0.954} & \cellsecond\bf{31.95} & \cellthird\bf{0.955} & \cellsecond\bf{31.95} & \cellthird\bf{0.955} \\
+vax\_c800 & \cellthird\bf{29.8} & \cellthird\bf{0.936} & \cellthird\bf{30.69} & \cellthird\bf{0.944} & \cellfirst\bf{31.78} & \cellsecond\bf{0.953} & \cellfirst\bf{32.1} & \cellsecond\bf{0.955} & \cellfirst\bf{32.17} & \cellsecond\bf{0.956} & \cellfirst\bf{32.18} & \cellsecond\bf{0.956} \\
+nsvf & 24.96 & 0.875 & 26.04 & 0.893 & 26.91 & 0.908 & 27.52 & 0.92 & 28.04 & 0.93 & 28.17 & 0.934 \\
+plenoctrees & 28.69 & 0.933 & 29.81 & \cellthird\bf{0.944} & 31.28 & \cellfirst\bf{0.955} & 31.47 & \cellfirst\bf{0.957} & 31.55 & \cellfirst\bf{0.957} & 31.53 & \cellfirst\bf{0.958} \\
+\bottomrule
+\end{tabular}
+\caption{NeRF-Synthetic dataset. Mean of 8 scenes.}
+\label{tab:example2}
+\end{table*}
