@@ -84,7 +84,7 @@ class Config:
   print_every: int = 500  # The number of steps between reports to tensorboard.
   render_every: int = 5000  # The number of steps between test set image renderings.
   gc_every: int = 10000  # The number of steps between garbage collections.
-  test_render_interval: int = 1  # The interval between images saved to disk.
+  test_render_interval: int = 0  # The interval between images saved to disk.
   disable_multiscale_loss: bool = False  # If True, disable multiscale loss.
   randomized: bool = True  # Use randomized stratified sampling.
   near: float = 2.  # Near plane distance.
