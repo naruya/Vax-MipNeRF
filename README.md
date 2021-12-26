@@ -2,7 +2,7 @@
 
 This repository is part of the official implementation of [VaxNeRF](https://github.com/naruya/VaxNeRF).
 
-Vax'ed MipNeRF achieves the final accuracy of the original NeRF about 28 times faster just by combining visual hull.
+Vax'ed MipNeRF achieves the final accuracy of the original NeRF about **28 times** faster just by combining visual hull.
 
 ![psnr_mip](https://user-images.githubusercontent.com/23403885/147407121-b89fcfb3-0eb8-4d7b-9e22-a30a23da5548.png)
 
