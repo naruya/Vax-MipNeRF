@@ -10,13 +10,14 @@ import argparse
 
 parser = argparse.ArgumentParser()
 parser.add_argument("--exp_name", type=str, default="../logs/*/*")
+parser.add_argument("--out_path", type=str, default="out.txt")
 args = parser.parse_args()
 
 exp_name = args.exp_name
 
 exp_list = sorted(glob.glob(exp_name))
 
-data = []
+data = {}
 
 for exp_path in exp_list:
     check_paths = [path for path in glob.glob(exp_path + "/checkpoint*") if not "tmp" in path]
@@ -40,8 +41,9 @@ for exp_path in exp_list:
     dt = np.median(dtimes)
     times.extend(np.arange(20,110,10) * dt)  # 10,20,30,40,50,60,70,80,90,100
 
-    times = np.array(times) / 60.
-    print(exp_path, list(np.round(times, decimals=1)))
+    times = list(np.array(times) / 60.)
+    print(exp_path)
+    print(str(list(np.round(times, decimals=1)))[1:-1])
 
     
     psnrs_paths = glob.glob(exp_path + "/test_preds/psnrs_*")
@@ -55,7 +57,7 @@ for exp_path in exp_list:
         assert len(psnr) == 1
         psnr = np.mean(np.array(psnr[0].split(), np.float32))
         psnrs.append(psnr)
-    print(psnrs, len(psnrs))
+    print(str(list(np.round(psnrs,3)))[1:-1], len(psnrs))
 
     ssims_paths = glob.glob(exp_path + "/test_preds/ssims_*")
     indices = np.argsort(np.array([path.split('_')[-1].split('.')[0] for path in ssims_paths], np.int64))
@@ -68,18 +70,19 @@ for exp_path in exp_list:
         assert len(ssim) == 1
         ssim = np.mean(np.array(ssim[0].split(), np.float32))
         ssims.append(ssim)
-    print(ssims, len(ssims))
+    print(str(list(np.round(ssims,3)))[1:-1], len(ssims))
 
-    data.append([exp_path.split('/')[-1], times, psnrs, ssims])
+    data[exp_path] = (times, psnrs, ssims)
 
 psnrs, ssims = [], []
-for datai in data:
-    psnrs.append(datai[2][-1])
-    ssims.append(datai[3][-1])
+for key, value in data.items():
+    psnrs.append(value[1][-1])
+    ssims.append(value[2][-1])
 print("PSNR:", np.mean(psnrs), ", SSIM:", np.mean(ssims))
 
-
-import pickle
-
-with open('output.pkl', 'wb') as f:
-    pickle.dump(data , f)
+with open(args.out_path, 'w') as f:
+    for key, value in data.items():
+        f.write(key + '\n')
+        for i in range(3):
+            f.write(str(list(np.round(value[i], 4)))[1:-1].replace(',', '') + '\n')
+        f.write('\n')
