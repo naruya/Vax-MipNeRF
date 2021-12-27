@@ -10,6 +10,12 @@ Vax'ed MipNeRF achieves the final accuracy of the original NeRF about **28 times
 
 Please see the README of [JaxNeRF](https://github.com/google-research/google-research/tree/master/jaxnerf).
 
+and please install [Gin Config](https://github.com/google/gin-config)
+
+```
+$ pip install gin-config
+```
+
 ## Quick start
 
 ### Training
