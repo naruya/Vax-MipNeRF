@@ -21,6 +21,7 @@ $ pip install gin-config
 ### Training
 
 First, please clone the [VaxNeRF](https://github.com/naruya/VaxNeRF) repository for visual hull.
+The visual hull options are a little different from VaxNeRF, so please run it again even if you have already done that before.
 
 ```shell
 # make a bounding volume voxel using Visual Hull
@@ -40,8 +41,6 @@ python train.py \
     --voxel_dir ../data/voxel/lego \
     --train_dir ../logs/vax-mip/lego
 ```
-
-Make sure to set `--pooling` option for visual hull.
 
 ### Evaluation
 
