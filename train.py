@@ -29,6 +29,7 @@ from jax import device_put
 import jax.numpy as jnp
 import numpy as np
 import os
+import time
 
 from internal import datasets
 from internal import math
@@ -39,6 +40,7 @@ from internal import vis
 
 FLAGS = flags.FLAGS
 utils.define_common_flags()
+flags.DEFINE_float('timelimit', -1., 'Time limit for training.')
 
 jax.config.parse_flags_with_absl()
 
@@ -245,6 +247,9 @@ def main(unused_argv):
   len_c_list = []
   len_f_list = []
 
+  if FLAGS.timelimit > 0:
+    time_start = time_pred = time.time()  # for train timelimit
+    config.render_every = config.save_every = config.max_steps
   for step, batch in zip(range(init_step, config.max_steps + 1), pdataset):
     if reset_timer:
       t_loop_start = time.time()
@@ -358,6 +363,13 @@ def main(unused_argv):
           summary_writer.image('test_pred_' + k, v, step)
         summary_writer.image('test_pred_acc', pred_acc, step)
         summary_writer.image('test_target', test_case['pixels'], step)
+
+    if FLAGS.timelimit > 0:
+      time_now = time.time()
+      if FLAGS.timelimit < (time_now - time_start) + (time_now - time_pred):
+        print("Time Limit!", time_now - time_start, "[sec]")
+        break
+      time_pred = time_now
 
   if config.max_steps % config.save_every != 0:
     state = jax.device_get(jax.tree_map(lambda x: x[0], state))
