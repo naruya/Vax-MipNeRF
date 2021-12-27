@@ -44,16 +44,20 @@ python eval.py \
     --gin_file ./configs/blender_vax_c128f128.gin \
     --data_dir ../data/nerf_synthetic/lego \
     --voxel_dir ../data/voxel/lego \
-    --train_dir ../logs/vax-mip/lego
+    --train_dir ../logs/vax-mip/lego \
+    --eval_once
 ```
 
 ### Options
 
-To avoid out of memory errors, please reduce the batch size by adding the following options. (Make sure to set the `chunk` size smaller than the `batch_size`)
+- To avoid out of memory errors, please reduce the batch size by adding the following options. (Make sure to set the `chunk` size smaller than the `batch_size`)
 
 ```shell
-    --gin_param="Config.batch_size=1024" --gin_param="Config.chunk=1000"
+--gin_param="Config.batch_size=1024" --gin_param="Config.chunk=1000"
 ```
+
+- To evaluate all saved checkpoints, remove the `--eval_once`. (Do not specify `--eval_once False`. It will be recognized as `True`).
+
 
 ## Acknowledgements
 I would like to thank the authors of [NeRF](http://www.matthewtancik.com/nerf) and [MipNeRF](https://jonbarron.info/mipnerf/), and the developers of [JaxNeRF](https://github.com/google-research/google-research/tree/master/jaxnerf).
