@@ -43,6 +43,8 @@ flags.DEFINE_bool(
     'checkpoints if any exist.')
 flags.DEFINE_bool('save_output', True,
                   'If True, save predicted images to disk.')
+flags.DEFINE_bool('save_gif', True,
+                  'If True, save gif.')
 
 
 def main(unused_argv):
@@ -92,11 +94,34 @@ def main(unused_argv):
   # last_step = 0
   out_dir = path.join(FLAGS.train_dir,
                       'path_renders' if config.render_path else 'test_preds')
+  if FLAGS.save_output and (not utils.isdir(out_dir)):
+    utils.makedirs(out_dir)
+
+  # make gif
+  if FLAGS.save_gif:
+    import moviepy.editor as mpy
+    from tqdm import tqdm
+    state = checkpoints.restore_checkpoint(FLAGS.train_dir, state)
+    frames = []
+    for idx in tqdm(range(dataset.size)):
+      batch = next(dataset)
+      pred_color, pred_distance, pred_acc = models.render_image(
+          functools.partial(render_eval_pfn, state.optimizer.target),
+          batch['rays'],
+          None,
+          chunk=config.chunk)
+      if jax.host_id() == 0:  # Only record via host 0.
+        frames.append(pred_color)
+    if jax.host_id() == 0:  # Only record via host 0.
+      frames = [(np.clip(np.array(frame), 0., 1.) * 255.).astype(np.uint8) for frame in frames]
+      clip = mpy.ImageSequenceClip(frames, fps=20)
+      clip.write_gif(path.join(out_dir, FLAGS.data_dir.split('/')[-1] + "_10min.gif"))
+    print("done!")
+    return None
+
   if not FLAGS.eval_once:
     summary_writer = tensorboard.SummaryWriter(
         path.join(FLAGS.train_dir, 'eval'))
-  if FLAGS.save_output and (not utils.isdir(out_dir)):
-    utils.makedirs(out_dir)
 
   steps = sorted([int(cp.split('_')[-1]) for cp in glob.glob(path.join(FLAGS.train_dir, "checkpoint_*"))])
   if FLAGS.eval_once:

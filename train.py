@@ -371,10 +371,10 @@ def main(unused_argv):
         break
       time_pred = time_now
 
-  if config.max_steps % config.save_every != 0:
+  if config.max_steps % config.save_every != 0 or FLAGS.timelimit > 0:
     state = jax.device_get(jax.tree_map(lambda x: x[0], state))
     checkpoints.save_checkpoint(
-        FLAGS.train_dir, state, int(config.max_steps), keep=100)
+        FLAGS.train_dir, state, int(step), keep=100)
 
 
 if __name__ == '__main__':

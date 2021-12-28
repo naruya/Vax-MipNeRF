@@ -30,7 +30,8 @@ from internal import utils
 @gin.configurable
 class MipNerfModel(nn.Module):
   """Nerf NN Model with both coarse and fine MLPs."""
-  num_samples: int = 128  # The number of samples per level.
+  num_coarse_samples: int = 128  # The number of samples per level.
+  num_fine_samples: int = 128  # The number of samples per level.
   num_levels: int = 2  # The number of sampling levels.
   resample_padding: float = 0.01  # Dirichlet/alpha "padding" on the histogram.
   stop_level_grad: bool = True  # If True, don't backprop across levels')
@@ -68,6 +69,7 @@ class MipNerfModel(nn.Module):
     aux = []
     for i_level in range(self.num_levels):
       len_inpi = len_inpc if i_level == 0 else len_inpf
+      num_samples = self.num_coarse_samples if i_level == 0 else self.num_fine_samples
       key, rng = random.split(rng)
       if i_level == 0:
         # Stratified sampling along rays
@@ -76,7 +78,7 @@ class MipNerfModel(nn.Module):
             rays.origins,
             rays.directions,
             rays.radii,
-            self.num_samples,
+            num_samples,
             rays.near,
             rays.far,
             randomized,
