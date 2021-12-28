@@ -1,0 +1,7 @@
+Config.dataset_loader = 'blender'
+Config.batching = 'single_image'
+MipNerfModel.use_vax = True
+
+MipNerfModel.num_coarse_samples = 64
+MipNerfModel.num_fine_samples = 128
+MipNerfModel.num_levels = 2
