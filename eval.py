@@ -43,7 +43,7 @@ flags.DEFINE_bool(
     'checkpoints if any exist.')
 flags.DEFINE_bool('save_output', True,
                   'If True, save predicted images to disk.')
-flags.DEFINE_bool('save_gif', True,
+flags.DEFINE_bool('save_gif', False,
                   'If True, save gif.')
 
 
