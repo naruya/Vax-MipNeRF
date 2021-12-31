@@ -34,7 +34,7 @@ for exp_path in exp_list:
     times.extend(np.arange(1,11) * dt)  # 1,2,3,4,5,6,7,8,9,10
     
     dtimes = []
-    for i in range(9,18):
+    for i in range(9,len(check_paths)-1):
         dt1 = datetime.datetime.fromtimestamp(check_paths[i].stat().st_mtime)
         dt2 = datetime.datetime.fromtimestamp(check_paths[i+1].stat().st_mtime)
         dtimes.append((dt2 - dt1).seconds / 10 / 60.)
