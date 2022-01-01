@@ -109,7 +109,7 @@ class MipNerfModel(nn.Module):
         pts= digitize(samples[0], rays.near[0,0], rays.far[0,0], voxel.shape[0])
         mask = voxel[pts[..., 0], pts[..., 1], pts[..., 2]].squeeze()
         aux.append(jnp.sum(mask))
-        ind_inp, ind_bak = jnp.split(jnp.argsort(mask)[::-1], [len_inpi])
+        ind_inp, ind_bak = jnp.split(jnp.argsort(mask)[::-1], [min(len(mask), len_inpi)])
       else:
         ind_inp, ind_bak = Ellipsis, Ellipsis
 
@@ -146,7 +146,7 @@ class MipNerfModel(nn.Module):
 
       if self.use_vax:
         ind = jnp.argsort(jnp.concatenate([ind_inp, ind_bak]))
-        len_pad = batch_size * num_samples - len_inpi
+        len_pad = batch_size * num_samples - len(ind_inp)
         rgb = jnp.vstack([rgb, jnp.zeros([len_pad, 3])])[ind] * mask[:, None]
         density = jnp.vstack([density, jnp.zeros([len_pad, 1])])[ind] * mask[:, None]
 

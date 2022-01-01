@@ -74,11 +74,6 @@ for exp_path in exp_list:
 
     data[exp_path] = (times, psnrs, ssims)
 
-psnrs, ssims = [], []
-for key, value in data.items():
-    psnrs.append(value[1][-1])
-    ssims.append(value[2][-1])
-print("PSNR:", np.mean(psnrs), ", SSIM:", np.mean(ssims))
 
 with open(args.out_path, 'w') as f:
     for key, value in data.items():
@@ -86,3 +81,10 @@ with open(args.out_path, 'w') as f:
         for i in range(3):
             f.write(str(list(np.round(value[i], 4)))[1:-1].replace(',', '') + '\n')
         f.write('\n')
+
+
+psnrs, ssims = [], []
+for key, value in data.items():
+    psnrs.append(value[1][-1])
+    ssims.append(value[2][-1])
+print("PSNR:", np.mean(psnrs), ", SSIM:", np.mean(ssims))
