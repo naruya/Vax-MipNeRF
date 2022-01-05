@@ -1,0 +1,6 @@
+Config.dataset_loader = 'nsvf'
+Config.batching = 'single_image'
+MipNerfModel.use_vax = True
+
+MipNerfModel.num_coarse_samples = 600
+MipNerfModel.num_levels = 1

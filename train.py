@@ -166,6 +166,11 @@ def main(unused_argv):
   dataset = datasets.get_dataset('train', FLAGS.data_dir, config)
   test_dataset = datasets.get_dataset('test', FLAGS.data_dir, config)
 
+  if config.dataset_loader == "nsvf":
+    with open(os.path.join(FLAGS.data_dir, "near_and_far.txt"), 'r') as f:
+      near, far = f.readline().split()
+      config.near, config.far = float(near), float(far)
+
   rng, key = random.split(rng)
   model, variables = models.construct_mipnerf(key, dataset.peek())
   num_params = jax.tree_util.tree_reduce(
