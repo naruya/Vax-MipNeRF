@@ -603,8 +603,105 @@ class LLFF(Dataset):
     return poses_reset
 
 
+class NSVF(Dataset):
+    """NSVF Generic Dataset."""
+
+    def _load_renderings(self, config):
+        """Load images from disk."""
+        # from plen_octrees
+        if config.render_path:
+            raise ValueError("render_path cannot be used for the NSVF dataset.")
+
+        # K : np.ndarray = np.loadtxt(path.join(self.data_dir, "intrinsics.txt"))
+        pose_files = sorted(os.listdir(path.join(self.data_dir, 'pose')))
+        img_files = sorted(os.listdir(path.join(self.data_dir, 'rgb')))
+
+        if self.split == 'train':
+            pose_files = [x for x in pose_files if x.startswith('0_')]
+            img_files = [x for x in img_files if x.startswith('0_')]
+        elif self.split == 'val':
+            pose_files = [x for x in pose_files if x.startswith('1_')]
+            img_files = [x for x in img_files if x.startswith('1_')]
+        elif self.split == 'test':
+            test_pose_files = [x for x in pose_files if x.startswith('2_')]
+            test_img_files = [x for x in img_files if x.startswith('2_')]
+            if len(test_pose_files) == 0:
+                test_pose_files = [x for x in pose_files if x.startswith('1_')]
+                test_img_files = [x for x in img_files if x.startswith('1_')]
+            pose_files = test_pose_files
+            img_files = test_img_files
+
+        images = []
+
+        assert len(img_files) == len(pose_files)
+        for img_fname in img_files:
+            img_fname = path.join(self.data_dir, 'rgb', img_fname)
+            with utils.open_file(img_fname, "rb") as imgin:
+                image = np.array(Image.open(imgin), dtype=np.float32) / 255.0
+            if image.shape[-1] == 4:
+                # Alpha channel available
+                if config.white_bkgd and image.shape[-1] == 4:  ### CAUTION!
+                    mask = image[..., -1:]
+                    image = image[..., :3] * mask + (1.0 - mask)
+                else:
+                    image = image[..., :3]
+            if config.factor > 1:
+                [rsz_h, rsz_w] = [hw // config.factor for hw in image.shape[:2]]
+                image = cv2.resize(
+                    image, (rsz_w, rsz_h), interpolation=cv2.INTER_AREA
+                )
+            images.append(image)
+
+        # https://github.com/creiser/kilonerf/blob/master/load_nsvf_dataset.py
+        cams = []
+        for pose_fname in pose_files:
+            cam_mtx = self.load_matrix(path.join(self.data_dir, 'pose', pose_fname))
+            cam_mtx = self.parse_extrinsics(cam_mtx, world2camera=False)
+            cam_mtx[:3, 1:3] = -cam_mtx[:3, 1:3]
+            cams.append(cam_mtx[None, :])  # C2W
+
+        self.images = np.stack(images, axis=0)
+        self.n_examples, self.h, self.w = self.images.shape[:3]
+        self.resolution = self.h * self.w
+        self.camtoworlds = np.concatenate(cams, 0).astype(np.float32)
+
+        # https://github.com/vsitzmann/deepvoxels
+        with open(path.join(self.data_dir, "intrinsics.txt"), 'r') as file:
+            focal, cx, cy, _ = self.line2floats(file.readline())
+
+        self.focal = focal
+        if config.factor > 1:
+            self.focal /= config.factor
+
+        if self.split == 'train':
+            origins = self.camtoworlds[:, :3, -1]
+            rsize = np.max(np.abs(origins)) * 2  # real size
+            near, far = rsize * 0.15, rsize * 0.85  ### TODO
+            with open(path.join(self.data_dir, "near_and_far.txt"), 'w') as f:
+                f.write(str(near) +" " + str(far))
+
+
+    def load_matrix(self, path):
+        return np.array([[float(w) for w in line.strip().split()] for line in open(path)]).astype(np.float32)
+
+
+    def line2floats(self, line):
+        return map(float, line.strip().split())
+
+
+    def parse_extrinsics(self, extrinsics, world2camera=True):
+        if extrinsics.shape[0] == 3 and extrinsics.shape[1] == 4:
+            extrinsics = np.vstack([extrinsics, np.array([[0, 0, 0, 1.0]])])
+        if extrinsics.shape[0] == 1 and extrinsics.shape[1] == 16:
+            extrinsics = extrinsics.reshape(4, 4)
+        if world2camera:
+            extrinsics = np.linalg.inv(extrinsics).astype(np.float32)
+        return extrinsics
+
+
 dataset_dict = {
     'blender': Blender,
     'llff': LLFF,
+    'nsvf': NSVF,
     'multicam': Multicam,
 }
